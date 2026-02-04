@@ -6,7 +6,6 @@ import {
   GeoJSON,
   useMap,
 } from "react-leaflet";
-import { parcels } from "../data/parcels";
 import * as turf from "@turf/turf";
 import { useEffect, useState } from "react";
 
@@ -16,7 +15,10 @@ function RecenterButton({ location }) {
   if (!location) return null;
 
   return (
-    <div className="leaflet-top leaflet-right" style={{ pointerEvents: "auto" }}>
+    <div
+      className="leaflet-top leaflet-right"
+      style={{ pointerEvents: "auto" }}
+    >
       <button
         onClick={() =>
           map.setView([location.lat, location.lng], 17, { animate: true })
@@ -38,10 +40,31 @@ function RecenterButton({ location }) {
 }
 
 function MapView({ location }) {
+  const [parcels, setParcels] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [currentParcel, setCurrentParcel] = useState(null);
 
+  /* Fetch parcels from backend */
   useEffect(() => {
-    if (!location) return;
+    fetch("http://localhost:4000/api/parcels")
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("BACKEND PARCELS TYPE:", typeof data);
+        console.log("BACKEND PARCELS OBJECT:", data);
+        console.log("IS FEATURE COLLECTION:", data?.type);
+        console.log("FEATURE COUNT:", data?.features?.length);
+        setParcels(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to load parcels", err);
+        setLoading(false);
+      });
+  }, []);
+
+  /* Point-in-polygon detection */
+  useEffect(() => {
+    if (!location || !parcels) return;
 
     const point = turf.point([location.lng, location.lat]);
 
@@ -53,27 +76,25 @@ function MapView({ location }) {
     }
 
     setCurrentParcel(null);
-  }, [location]);
+  }, [location, parcels]);
 
   const onEachParcel = (feature, layer) => {
     const { parcelId, owner, status } = feature.properties;
     layer.bindPopup(
       `<strong>${parcelId}</strong><br/>
        Owner: ${owner}<br/>
-       Status: ${status}`
+       Status: ${status}`,
     );
   };
 
   const parcelStyle = (feature) => ({
     color:
-      currentParcel &&
-      feature.properties.parcelId === currentParcel.parcelId
+      currentParcel && feature.properties.parcelId === currentParcel.parcelId
         ? "green"
         : "blue",
     weight: 2,
     fillOpacity:
-      currentParcel &&
-      feature.properties.parcelId === currentParcel.parcelId
+      currentParcel && feature.properties.parcelId === currentParcel.parcelId
         ? 0.5
         : 0.3,
   });
@@ -81,11 +102,7 @@ function MapView({ location }) {
   return (
     <>
       <MapContainer
-        center={
-          location
-            ? [location.lat, location.lng]
-            : [22.9734, 78.6569]
-        }
+        center={location ? [location.lat, location.lng] : [22.9734, 78.6569]}
         zoom={16}
         style={{ height: "70vh", width: "100%" }}
       >
@@ -96,16 +113,37 @@ function MapView({ location }) {
 
         <RecenterButton location={location} />
 
-        <GeoJSON
-          data={parcels}
-          style={parcelStyle}
-          onEachFeature={onEachParcel}
-        />
+        {parcels &&
+          parcels.type === "FeatureCollection" &&
+          parcels.features?.length > 0 && (
+            <GeoJSON
+              data={parcels}
+              style={parcelStyle}
+              onEachFeature={onEachParcel}
+            />
+          )}
 
         {location && (
           <Marker position={[location.lat, location.lng]}>
             <Popup>You are here</Popup>
           </Marker>
+        )}
+
+        {loading && (
+          <div
+            style={{
+              position: "absolute",
+              top: "10px",
+              left: "10px",
+              background: "white",
+              padding: "6px 10px",
+              borderRadius: "6px",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+              fontSize: "14px",
+            }}
+          >
+            Loading land parcels…
+          </div>
         )}
       </MapContainer>
 
@@ -116,9 +154,15 @@ function MapView({ location }) {
             <h3 className="font-semibold text-gray-700 mb-2">
               🧾 Current Land Parcel
             </h3>
-            <p><strong>ID:</strong> {currentParcel.parcelId}</p>
-            <p><strong>Owner:</strong> {currentParcel.owner}</p>
-            <p><strong>Status:</strong> {currentParcel.status}</p>
+            <p>
+              <strong>ID:</strong> {currentParcel.parcelId}
+            </p>
+            <p>
+              <strong>Owner:</strong> {currentParcel.owner}
+            </p>
+            <p>
+              <strong>Status:</strong> {currentParcel.status}
+            </p>
           </>
         ) : (
           <p className="text-sm text-gray-500">
