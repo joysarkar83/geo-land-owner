@@ -10,8 +10,10 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "cors": "^2.8.6",
-    "express": "^5.2.1"
+    "cors": "^2.8.6"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "express": "^5.2.1"
+  }
 }
