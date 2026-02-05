@@ -7,11 +7,41 @@ import {
   useMap,
 } from "react-leaflet";
 import * as turf from "@turf/turf";
-import { useEffect, useState, memo } from "react";
+import { useEffect, useState, memo, useContext } from "react";
+import L from "leaflet";
+import { DarkModeContext } from "../App";
 
-/** Re-center control component */
+/* ------------------ ICONS ------------------ */
+
+const createCustomMarkerIcon = () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%233b82f6" width="38" height="38"><path d="M12 2C7.03 2 3 6.03 3 11c0 5.25 7.5 11 9 11s9-5.75 9-11c0-4.97-4.03-9-9-9zm0 12.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z"/></svg>`;
+  const blob = new Blob([svg], { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+
+  return L.icon({
+    iconUrl: url,
+    iconSize: [38, 38],
+    iconAnchor: [19, 36],
+    popupAnchor: [0, -34],
+  });
+};
+
+const createPulsingIcon = (color = "#3b82f6") => {
+  const html = `<span class="pulse-marker" style="--pulse-color:${color};"></span>`;
+
+  return L.divIcon({
+    className: "pulse-marker-container",
+    html,
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+  });
+};
+
+/* ------------------ RECENTER BUTTON ------------------ */
+
 const RecenterButton = memo(function RecenterButton({ location }) {
   const map = useMap();
+
   if (!location) return null;
 
   return (
@@ -23,42 +53,48 @@ const RecenterButton = memo(function RecenterButton({ location }) {
         onClick={() =>
           map.setView([location.lat, location.lng], 17, { animate: true })
         }
-        className="map-control m-3 px-4 py-2 font-medium text-gray-700 hover:text-gray-900 smooth-transition focus:outline-none focus:ring-2 focus:ring-blue-500"
-        aria-label="Re-center map to current location"
-        title="Re-center map"
+        className="m-3 p-3 bg-white dark:bg-gray-700 rounded-full shadow-lg hover:shadow-xl"
+        aria-label="Re-center map"
       >
-        📍 Re-center
+        📍
       </button>
     </div>
   );
 });
 
+/* ------------------ MAIN ------------------ */
+
 function MapView({ location }) {
+  const { darkMode } = useContext(DarkModeContext);
+
   const [parcels, setParcels] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentParcel, setCurrentParcel] = useState(null);
 
-  /** Fetch parcels from backend */
+  const [markerIcon] = useState(createCustomMarkerIcon());
+  const [pulseIcon] = useState(createPulsingIcon());
+
+  /* ------------------ FETCH PARCELS ------------------ */
+
   useEffect(() => {
     const controller = new AbortController();
-    
-    fetch("http://localhost:4000/api/parcels", { signal: controller.signal })
+
+    fetch("http://localhost:4000/api/parcels", {
+      signal: controller.signal,
+    })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then((data) => {
-        if (!data?.features?.length) {
-          setError("No land parcels available");
-        }
         setParcels(data);
         setLoading(false);
       })
       .catch((err) => {
         if (err.name !== "AbortError") {
-          setError("Failed to load land parcels. Please check the backend connection.");
-          console.error("Failed to load parcels:", err);
+          console.error(err);
+          setError("Failed to load land parcels.");
         }
         setLoading(false);
       });
@@ -66,7 +102,8 @@ function MapView({ location }) {
     return () => controller.abort();
   }, []);
 
-  /** Point-in-polygon detection to find current parcel */
+  /* ------------------ POINT IN POLYGON ------------------ */
+
   useEffect(() => {
     if (!location || !parcels?.features) return;
 
@@ -82,48 +119,46 @@ function MapView({ location }) {
     setCurrentParcel(null);
   }, [location, parcels]);
 
-  /** Add interactive popup to each parcel */
+  /* ------------------ PARCEL INTERACTION ------------------ */
+
   const onEachParcel = (feature, layer) => {
     const { parcelId, owner, status } = feature.properties;
-    const html = `
-      <div class="p-2">
-        <strong class="text-lg block mb-1">${parcelId}</strong>
-        <div class="text-sm space-y-1">
-          <p><strong>Owner:</strong> ${owner}</p>
-          <p><strong>Status:</strong> <span class="inline-block px-2 py-1 rounded text-xs font-medium ${
-            status === 'available' 
-              ? 'bg-green-100 text-green-800' 
-              : 'bg-yellow-100 text-yellow-800'
-          }">${status}</span></p>
-        </div>
-      </div>
-    `;
-    layer.bindPopup(html);
-    layer.on('mouseover', function() { this.openPopup(); });
-    layer.on('mouseout', function() { this.closePopup(); });
+
+    layer.bindPopup(`
+      <strong>${parcelId}</strong><br/>
+      Owner: ${owner}<br/>
+      Status: ${status}
+    `);
   };
 
-  /** Style parcels based on whether they're the current location */
   const parcelStyle = (feature) => {
-    const isCurrentParcel = currentParcel && 
+    const active =
+      currentParcel &&
       feature.properties.parcelId === currentParcel.parcelId;
-    
+
     return {
-      color: isCurrentParcel ? "#059669" : "#2563eb",
-      weight: isCurrentParcel ? 3 : 2,
-      fillOpacity: isCurrentParcel ? 0.6 : 0.3,
-      fillColor: isCurrentParcel ? "#10b981" : "#3b82f6",
-      dashArray: isCurrentParcel ? "5, 5" : "none",
+      color: active ? "#059669" : "#2563eb",
+      weight: active ? 3 : 2,
+      fillOpacity: active ? 0.55 : 0.3,
+      fillColor: active ? "#10b981" : "#3b82f6",
+      dashArray: active ? "6 6" : null,
     };
   };
 
+  /* ------------------ LAYOUT ------------------ */
+
   return (
-    <div className="space-y-4">
-      <div className="card overflow-hidden">
+    <div className="flex gap-4 w-full h-screen overflow-hidden p-4">
+      {/* MAP */}
+      <div className="card flex-[7] h-full overflow-hidden">
         <MapContainer
-          center={location ? [location.lat, location.lng] : [22.9734, 78.6569]}
+          center={
+            location
+              ? [location.lat, location.lng]
+              : [22.9734, 78.6569]
+          }
           zoom={16}
-          style={{ height: "calc(70vh - 2px)", width: "100%" }}
+          style={{ height: "100%", width: "100%" }}
           className="rounded-lg"
         >
           <TileLayer
@@ -133,7 +168,7 @@ function MapView({ location }) {
 
           <RecenterButton location={location} />
 
-          {parcels?.type === "FeatureCollection" && parcels.features?.length > 0 && (
+          {parcels && (
             <GeoJSON
               data={parcels}
               style={parcelStyle}
@@ -141,92 +176,93 @@ function MapView({ location }) {
             />
           )}
 
+          {/* CURRENT LOCATION */}
           {location && (
-            <Marker position={[location.lat, location.lng]}>
-              <Popup>
-                <div className="text-center">
-                  <p className="font-semibold">📍 Your Location</p>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Lat: {location.lat.toFixed(4)}, Lng: {location.lng.toFixed(4)}
-                  </p>
-                </div>
-              </Popup>
-            </Marker>
+            <>
+              {/* Pulse */}
+              <Marker
+                position={[location.lat, location.lng]}
+                icon={pulseIcon}
+                interactive={false}
+              />
+
+              {/* Pin */}
+              <Marker
+                position={[location.lat, location.lng]}
+                icon={markerIcon}
+              >
+                <Popup>
+                  <strong>📍 Your Location</strong>
+                  <br />
+                  {location.lat.toFixed(4)},{" "}
+                  {location.lng.toFixed(4)}
+                </Popup>
+              </Marker>
+            </>
           )}
 
           {loading && (
-            <div
-              className="map-control absolute top-4 left-4 z-10 px-4 py-3 flex items-center gap-2"
-              role="status"
-              aria-live="polite"
-            >
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-              <span className="text-sm font-medium text-gray-700">Loading parcels…</span>
+            <div className="absolute top-4 left-4 z-[1000] bg-white px-3 py-2 rounded shadow">
+              Loading parcels…
             </div>
           )}
 
           {error && (
-            <div
-              className="map-control absolute top-4 left-4 z-10 px-4 py-3 max-w-xs bg-red-50 border border-red-200"
-              role="alert"
-              aria-live="polite"
-            >
-              <p className="text-sm font-medium text-red-900">Error</p>
-              <p className="text-xs text-red-800 mt-1">{error}</p>
+            <div className="absolute top-4 left-4 z-[1000] bg-red-100 text-red-800 px-3 py-2 rounded shadow">
+              {error}
             </div>
           )}
         </MapContainer>
       </div>
 
-      {/* Parcel Info Panel */}
-      <div className="card p-6">
+      {/* INFO PANEL */}
+      <div className="card flex-[3] h-full overflow-y-auto p-6">
         {currentParcel ? (
-          <div>
-            <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <span className="text-xl">🧾</span>
-              Current Land Parcel
+          <>
+            <h3 className="text-lg font-bold mb-4">
+              🧾 Current Parcel
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-gray-50 rounded-lg p-4">
-                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs uppercase text-gray-500">
                   Parcel ID
                 </p>
-                <p className="text-lg font-bold text-gray-900 mt-1">
+                <p className="font-semibold">
                   {currentParcel.parcelId}
                 </p>
               </div>
-              <div className="bg-gray-50 rounded-lg p-4">
-                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+
+              <div>
+                <p className="text-xs uppercase text-gray-500">
                   Owner
                 </p>
-                <p className="text-lg font-bold text-gray-900 mt-1">
+                <p className="font-semibold">
                   {currentParcel.owner}
                 </p>
               </div>
-              <div className="bg-gray-50 rounded-lg p-4">
-                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+
+              <div>
+                <p className="text-xs uppercase text-gray-500">
                   Status
                 </p>
-                <div className="mt-1">
-                  <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
-                    currentParcel.status === 'available'
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-yellow-100 text-yellow-800'
-                  }`}>
-                    {currentParcel.status}
-                  </span>
-                </div>
+                <span
+                  className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                    currentParcel.status === "available"
+                      ? "bg-green-200 text-green-900"
+                      : "bg-yellow-200 text-yellow-900"
+                  }`}
+                >
+                  {currentParcel.status}
+                </span>
               </div>
             </div>
-          </div>
+          </>
         ) : (
-          <div className="text-center py-8">
-            <p className="text-3xl mb-3">📍</p>
-            <p className="text-gray-600 font-medium">
+          <div className="text-center mt-12">
+            <p className="text-3xl">📍</p>
+            <p className="font-medium">
               You are not inside any registered parcel
-            </p>
-            <p className="text-sm text-gray-500 mt-2">
-              Move to a registered area to see parcel details
             </p>
           </div>
         )}
